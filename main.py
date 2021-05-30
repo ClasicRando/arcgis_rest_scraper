@@ -101,26 +101,39 @@ class RestMetadata:
 
     @property
     def scrape_count(self) -> int:
+        """ Used for generating queries. Caps feature count per query to 10000 """
         return self.max_record_count if self.max_record_count <= 10000 else 10000
 
     @property
     def oid_query_count(self) -> int:
+        """ Number of queries needed if Oid field used """
         return ceil((self.max_min_oid[0] - self.max_min_oid[1] + 1) / self.scrape_count)
 
     @property
     def pagination_query_count(self) -> int:
+        """ Number of queries needed if pagination used """
         return ceil(self.source_count / self.scrape_count)
 
     @property
     def is_table(self) -> bool:
+        """ Checks if the service is a Table type (ie no geometry provided) """
         return self.server_type == "TABLE"
 
     @property
     def geo_text(self) -> str:
+        """
+        String added to the queries for geometry. If service is a Table then empty string.
+        Adds an out spatial reference for geometry to NAD83. Might need to be changed in the future
+
+        TODO
+        ----
+        - add ability to provide spatial reference override for non-NA services
+        """
         return "" if self.is_table else f"&geometryType={self.geo_type}&outSR=4269"
 
     @property
     def json_text(self) -> str:
+        """ Converts class attributes to a dict for displaying details as JSON text """
         return dumps(
             {
                 "URL": self.url,
@@ -141,12 +154,16 @@ class RestMetadata:
 
     @property
     def queries(self) -> List[str]:
+        """
+        Get all the queries for this service. Returns empty list when no query method available
+
+        TODO
+        ----
+        - find other query methods when current methods exhausted
+        """
         if self.pagination:
             return [
-                self.url + self.get_pagination_query(
-                    i * self.scrape_count,
-                    self.scrape_count
-                )
+                self.url + self.get_pagination_query(i)
                 for i in range(self.pagination_query_count)
             ]
         elif self.oid_field and self.stats:
@@ -159,13 +176,19 @@ class RestMetadata:
         else:
             return []
 
-    def get_pagination_query(self, offset: int, record_count: int) -> str:
-        return f"/query?where=1+%3D+1&resultOffset={offset}&resultRecordCount={record_count}" \
-               f"{self.geo_text}&outFields=*&f=json"
+    def get_pagination_query(self, query_num: int) -> str:
+        """
+        Generate query for service when pagination is supported using query_num to get offset
+        """
+        return f"/query?where=1+%3D+1&resultOffset={query_num * self.scrape_count}" \
+               f"&resultRecordCount={self.scrape_count}{self.geo_text}&outFields=*&f=json"
 
     def get_oid_query(self, min_oid: int) -> str:
+        """
+        Generate query for service when Oid is used using a starting Oid number and an offset
+        """
         return f"/query?where={self.oid_field}+>%3D+{min_oid}+and+" \
-               f"{self.oid_field}+<%3D+{min_oid + self.max_record_count - 1}" \
+               f"{self.oid_field}+<%3D+{min_oid + self.scrape_count - 1}" \
                f"{self.geo_text}&outFields=*&f=json"
 
 
