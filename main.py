@@ -11,24 +11,93 @@ from typing import Optional, List, Tuple
 from requests import get, Session
 from pandas import DataFrame, read_csv
 from math import ceil
-from dataclasses import dataclass, asdict
 from json import dumps
 
 
-@dataclass
 class RestMetadata:
-    url: str
-    name: str = ""
-    source_count: int = -1
-    max_record_count: int = -1
-    pagination: bool = False
-    stats: bool = False
-    server_type: str = "Feature Layer"
-    geo_type: str = "esriGeometryPoint"
-    fields: List[str] = ()
-    oid_field: str = ""
-    max_min_oid: Tuple[int, int] = (-1, -1)
-    inc_oid: bool = False
+    """
+    Data class for the backing information for an ArcGIS REST server and how to query the service
+
+    Parameters
+    ----------
+    url : str
+        Base url of the service. Used to collect data and generate queries
+
+    Attributes
+    ----------
+    name: str
+        Name of the REST service. Used to generate the file name of the output
+    source_count : int
+        Number of records found within the service
+    max_record_count : int
+        Max number of records the service allows to be scraped in a single query. This is only used
+        for generating queries if it's less than 10000. A property of the class, scrape_count,
+        provides the true count that is use for generating queries
+    pagination: bool
+        Does the source provide the ability to page results. Easiest query generation
+    stats: bool
+        Does the source provide the ability to query statistics about the data. Used to get the max
+        and min Oid field values to generate queries
+    server_type : str
+        Property of the server that denotes if geometry is available for each feature
+    geo_type : str
+        Geometry type for each feature. Guides how geometry is stored in CSV
+    fields : List[str]
+        Field names for each feature
+    oid_field : str
+        Name of unique identifier field for each feature. Used when pagination is not provided
+    max_min_oid: Tuple[int, int]
+        max and min Oid field values if that method is required to query all features. Defaults to
+        -1 values if not required
+    inc_oid : bool
+        Is the Oid fields a sequential number. Checked using source_count and max Oid values
+    """
+    def __init__(self, url: str):
+        self.url = url
+        count_query = "/query?where=1%3D1&returnCountOnly=true&f=json"
+        field_query = "?f=json"
+        urls = [url + count_query, url + field_query]
+
+        with Session() as session:
+            for res in [fetch(session, url) for url in urls]:
+                if "count" in res:
+                    self.source_count = res["count"]
+                else:
+                    advanced_query = res.get("advancedQueryCapabilities", dict())
+                    self.server_type = res["type"]
+                    self.name = res["name"]
+                    self.max_record_count = int(res["maxRecordCount"])
+                    if advanced_query:
+                        self.pagination = advanced_query.get("supportsPagination", False)
+                    else:
+                        self.pagination = res.get("supportsPagination", False)
+                    if advanced_query:
+                        self.stats = advanced_query.get("supportsStatistics", False)
+                    else:
+                        self.stats = res.get("supportsStatistics", False)
+                    self.geo_type = res.get("geometryType", "")
+                    self.fields = [
+                        field["name"] for field in res["fields"]
+                        if field["name"] != "Shape" and field["type"] != "esriFieldTypeGeometry"
+                    ]
+                    if self.geo_type == "esriGeometryPoint":
+                        self.fields += ["X", "Y"]
+                    elif self.geo_type == "esriGeometryMultipoint":
+                        self.fields += ["POINTS"]
+                    elif self.geo_type == "esriGeometryPolygon":
+                        self.fields += ["RINGS"]
+                    oid_fields = [
+                        field["name"] for field in res["fields"]
+                        if field["type"] == "esriFieldTypeOID"
+                    ]
+                    if oid_fields:
+                        self.oid_field = oid_fields[0]
+            if self.stats and self.oid_field and not self.pagination:
+                res = fetch(session, self.url + max_min_query(self.oid_field))
+                attributes = res["features"][0]["attributes"]
+                self.max_min_oid = (attributes["MAX_VALUE"], attributes["MIN_VALUE"])
+                diff = self.max_min_oid[0] - self.max_min_oid[1] + 1
+                self.inc_oid = diff == self.source_count
 
     @property
     def scrape_count(self) -> int:
@@ -52,7 +121,23 @@ class RestMetadata:
 
     @property
     def json_text(self) -> str:
-        return dumps(asdict(self), indent=4)
+        return dumps(
+            {
+                "URL": self.url,
+                "Name": self.name,
+                "Source Count": self.source_count,
+                "Max Record Count": self.max_record_count,
+                "Pagination": self.pagination,
+                "Stats": self.stats,
+                "Server Type": self.server_type,
+                "Geometry Type": self.geo_type,
+                "Fields": self.fields,
+                "OID Fields": self.oid_field,
+                "Max Min OID": self.max_min_oid,
+                "Incremental OID": self.inc_oid
+            },
+            indent=4
+        )
 
     @property
     def queries(self) -> List[str]:
@@ -283,7 +368,7 @@ class MetadataFetcher(QRunnable):
     def run(self) -> None:
         start = time.time()
         try:
-            result = fetch_metadata(self.url)
+            result = RestMetadata(self.url)
         except:
             self.signals.error.emit(traceback.format_exc())
         else:
@@ -312,55 +397,6 @@ def max_min_query(oid_field: str) -> str:
            f'++%7D%2C%0D%0A++%7B%0D%0A++++"statisticType"%3A+"min"%2C%0D%0A++++"onStatisticField' \
            f'"%3A+"{oid_field}"%2C+++++%0D%0A++++"outStatisticFieldName"%3A+"MIN_VALUE"%0D%0A' \
            f'++%7D%0D%0A%5D&f=json'
-
-
-def fetch_metadata(url: str) -> RestMetadata:
-    count_query = "/query?where=1%3D1&returnCountOnly=true&f=json"
-    field_query = "?f=json"
-    urls = [url + count_query, url + field_query]
-    metadata = RestMetadata(url)
-
-    with Session() as session:
-        for res in [fetch(session, url) for url in urls]:
-            if "count" in res:
-                metadata.source_count = res["count"]
-            else:
-                advanced_query = res.get("advancedQueryCapabilities", dict())
-                metadata.server_type = res["type"]
-                metadata.name = res["name"]
-                metadata.max_record_count = int(res["maxRecordCount"])
-                if advanced_query:
-                    metadata.pagination = advanced_query.get("supportsPagination", False)
-                else:
-                    metadata.pagination = res.get("supportsPagination", False)
-                if advanced_query:
-                    metadata.stats = advanced_query.get("supportsStatistics", False)
-                else:
-                    metadata.stats = res.get("supportsStatistics", False)
-                metadata.geo_type = res.get("geometryType", "")
-                metadata.fields = [
-                    field["name"] for field in res["fields"]
-                    if field["name"] != "Shape" and field["type"] != "esriFieldTypeGeometry"
-                ]
-                if metadata.geo_type == "esriGeometryPoint":
-                    metadata.fields += ["X", "Y"]
-                elif metadata.geo_type == "esriGeometryMultipoint":
-                    metadata.fields += ["POINTS"]
-                elif metadata.geo_type == "esriGeometryPolygon":
-                    metadata.fields += ["RINGS"]
-                oid_fields = [
-                    field["name"] for field in res["fields"]
-                    if field["type"] == "esriFieldTypeOID"
-                ]
-                if oid_fields:
-                    metadata.oid_field = oid_fields[0]
-        if metadata.stats and metadata.oid_field and not metadata.pagination:
-            res = fetch(session, metadata.url + max_min_query(metadata.oid_field))
-            attributes = res["features"][0]["attributes"]
-            metadata.max_min_oid = (attributes["MAX_VALUE"], attributes["MIN_VALUE"])
-            diff = metadata.max_min_oid[0] - metadata.max_min_oid[1] + 1
-            metadata.inc_oid = diff == metadata.source_count
-    return metadata
 
 
 def handle_record(geo_type: str, feature: dict) -> list:
