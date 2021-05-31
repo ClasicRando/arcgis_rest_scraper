@@ -265,6 +265,10 @@ class MainWindow(QMainWindow):
         """ Scrape all features from service. Run all queries concurrently """
         if self.thread_pool.activeThreadCount() > 0:
             return
+        if self.rest_metadata is None:
+            return
+        if self.rest_metadata.source_count == -1:
+            return
 
         # Get queries needed for scraping
         queries = self.rest_metadata.queries
@@ -288,14 +292,15 @@ class MainWindow(QMainWindow):
     @pyqtSlot()
     def post_query(self):
         """
-        Slot called after query has been handled. Changes some attributes and if all queries done then starting
-        finishing process
+        Slot called after query has been handled. Changes some attributes and if all queries done
+        then starting finishing process
         """
         # Update current running queries and progress bar value
         self.current_queries_running -= 1
         self.scraping_progress.setValue(self.scraping_progress.value() + 1)
 
-        # If all queries are done then start Consolidator to collect temp files and generate result CSV
+        # If all queries are done then start Consolidator to collect temp files and generate result
+        # CSV
         if self.current_queries_running == 0:
             self.progress_message.setText("Consolidating data and cleaning temp files")
             worker = DataConsolidator(self.rest_metadata.name, self.start)
@@ -346,7 +351,8 @@ class QueryFetcher(QRunnable):
 
     def __init__(self, query: str, query_num: int, rest_metadata: RestMetadata):
         """
-        Runnable action to fetch a query result from the REST service and write the result to a temp file
+        Runnable action to fetch a query result from the REST service and write the result to a temp
+        file
 
         Parameters
         ----------
@@ -365,13 +371,16 @@ class QueryFetcher(QRunnable):
 
     @pyqtSlot()
     def run(self) -> None:
-        """ Action of runnable. Gets response from query and parses the features into a temp file """
+        """
+        Action of runnable. Gets response from query and parses the features into a temp file
+        """
         try:
             # GET request using query
             response = get(self.query)
             num_records = 0
 
-            # If successful query then consolidate features into DataFrame and write the results to a temp file
+            # If successful query then consolidate features into DataFrame and write the results to
+            # a temp file
             if response.status_code == 200:
                 # Map features from response using handle_record and geo_type
                 data = list(
@@ -406,7 +415,8 @@ class DataConsolidator(QRunnable):
 
     def __init__(self, service_name: str, start: float):
         """
-        Runnable action to join all temp files created by the query fetching workers into a single CSV result
+        Runnable action to join all temp files created by the query fetching workers into a single
+        CSV result
 
         Parameters
         ----------
@@ -423,25 +433,29 @@ class DataConsolidator(QRunnable):
     @pyqtSlot()
     def run(self) -> None:
         """
-        Action of runnable. Gets all temp files for the service and consolidates then into 1 file. Cleans temp files
+        Action of runnable. Gets all temp files for the service and consolidates then into 1 file.
+        Cleans temp files
         """
         try:
             # Initializes variables
             num_records = 0
             is_first = True
-            # Finds all the temp files needed using the temp_files folder and the service name in a regex to filter
+            # Finds all the temp files needed using the temp_files folder and the service name in a
+            # regex to filter
             temp_files = [
                 file
                 for file in os.listdir(f"{os.getcwd()}\\temp_files")
                 if re.search(f"{self.service_name}_\\d+\\.csv", file)
             ]
-            # For each temp file, read it into a DataFrame and write that DataFrame to the result file
+            # For each temp file, read it into a DataFrame and write that DataFrame to the result
+            # file
             for f in temp_files:
                 df = read_csv(f"{os.getcwd()}\\temp_files\\{f}")
                 # Increment the number of records
                 num_records += len(df.index)
-                # Write the DataFrame to the result file. Start by writing to file and including header but after the
-                # first file, switch to append mode and do not write a header line
+                # Write the DataFrame to the result file. Start by writing to file and including
+                # header but after the first file, switch to append mode and do not write a header
+                # line
                 df.to_csv(
                     f"{self.service_name}.csv",
                     mode="w" if is_first else "a",
@@ -453,7 +467,8 @@ class DataConsolidator(QRunnable):
         except:
             self.signals.error.emit(traceback.format_exc())
         else:
-            # Construct a result message showing records in result file and time to complete all scraping operations
+            # Construct a result message showing records in result file and time to complete all
+            # scraping operations
             text = trim_indent(f"""
             Output
             ------
@@ -483,7 +498,8 @@ class MetadataFetcher(QRunnable):
         """
         Action of runnable. Gets a RestMetadata object from the base url.
 
-        Object instantiation is in worker since the init of the class contain GET requests and may block the main thread
+        Object instantiation is in worker since the init of the class contain GET requests and may
+        block the main thread
         """
         start = time.time()
         try:
@@ -513,7 +529,8 @@ def fetch(session: Session, url: str) -> dict:
 
 def max_min_query(oid_field: str) -> str:
     """
-    Helper query postfix to get max and min Oid values. Given an Oid field name, can be added to the end of a base url
+    Helper query postfix to get max and min Oid values. Given an Oid field name, can be added to the
+    end of a base url
     """
     return f'/query?outStatistics=%5B%0D%0A+%7B%0D%0A++++"statisticType"%3A+"max"%2C%0D%0A' \
            f'++++"onStatisticField' \
@@ -537,13 +554,15 @@ def handle_record(geo_type: str, feature: dict) -> List[str]:
     """
     # collect all values from the attributes key and convert them to string
     record = [str(value).strip() for value in feature["attributes"].values()]
-    # If geometry is point, get X and Y and add to the record. If no geometry present, default to a blank X and Y
+    # If geometry is point, get X and Y and add to the record. If no geometry present, default to a
+    # blank X and Y
     if geo_type == "esriGeometryPoint":
         record += [
             str(point).strip()
             for point in feature.get("geometry", {"x": "", "y": ""}).values()
         ]
-    # If geometry is multi point, join coordinates into a list of points using json list notation and add to the record
+    # If geometry is multi point, join coordinates into a list of points using json list notation
+    # and add to the record
     elif geo_type == "esriGeometryMultipoint":
         record += [
             "[" + "],[".join((str(coordinate).strip() for coordinate in point)) + "]"
