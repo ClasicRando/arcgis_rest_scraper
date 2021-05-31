@@ -266,6 +266,10 @@ class MainWindow(QMainWindow):
         if self.thread_pool.activeThreadCount() > 0:
             return
 
+        # Get queries needed for scraping
+        queries = self.rest_metadata.queries
+        self.current_queries_running = len(queries)
+
         # Setup window to show progress with proper values
         self.toggle_progress()
         self.scraping_progress.setMaximum(self.current_queries_running + 1)
@@ -273,10 +277,6 @@ class MainWindow(QMainWindow):
 
         # Set start time
         self.start = time.time()
-
-        # Get queries needed for scraping
-        queries = self.rest_metadata.queries
-        self.current_queries_running = len(queries)
 
         # For each query generate a worker and start process
         for i, query in enumerate(queries):
