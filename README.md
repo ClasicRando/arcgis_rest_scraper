@@ -2,7 +2,7 @@
 **** DISCLAIMER ****
 
 I do not take fault for any data that is scraped but does not match the server's data. This is simply to cover myself if
-anything does wrong. I am open to feedback and improvements in the issues section
+anything does go wrong. I am open to feedback and improvements in the issues section
 
 Simple GUI providing the user the ability to scrape a REST service from ArcGIS using the primary URL of the service.
 From this URL, the metadata and scraping method are defined. Currently, just 2 cases are handled by the scraper:
