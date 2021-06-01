@@ -41,6 +41,7 @@ All features are queries with the output spatial reference as NAD83 (4269). This
 flexibility in the future
 
 <h3>Future Plans</h3>
+
 - preserve service data types when querying
 - finding and handling more scraping cases
 - allow user to define output spatial reference
