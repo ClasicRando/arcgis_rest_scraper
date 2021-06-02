@@ -1,7 +1,7 @@
 import unittest
 import os
 import json
-from main import handle_record
+from scraping import handle_record
 
 
 class MyTestCase(unittest.TestCase):
