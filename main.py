@@ -1,3 +1,4 @@
+import json
 import sys
 import time
 import re
@@ -562,12 +563,15 @@ def convert_json_value(x: Any) -> str:
         return x
     elif isinstance(x, int):
         return str(x)
+    # Note that for JSON numbers, some truncation might occur during json load into python dict
     elif isinstance(x, float):
         return format_float_positional(x).rstrip(".")
     elif isinstance(x, bool):
         return "TRUE" if x else "FALSE"
     elif x is None:
         return ""
+    elif x is list:
+        return json.dumps(x)
     else:
         return str(x)
 
@@ -599,13 +603,10 @@ def handle_record(geo_type: str, feature: dict) -> List[str]:
     # If geometry is multi point, join coordinates into a list of points using json list notation
     # and add to the record
     elif geo_type == "esriGeometryMultipoint":
-        record += [
-            "[" + "],[".join((convert_json_value(coordinate).strip() for coordinate in point)) + "]"
-            for point in feature["geometry"]["points"]
-        ]
+        record += [convert_json_value(feature["geometry"]["points"]).strip()]
     # If geometry is Polygon get the rings and add the value to the record
     elif geo_type == "esriGeometryPolygon":
-        record += [convert_json_value(feature["geometry"]["rings"][0]).strip()]
+        record += [convert_json_value(feature["geometry"]["rings"]).strip()]
     # Other geometries could exist but are not currently handled
     return record
 
