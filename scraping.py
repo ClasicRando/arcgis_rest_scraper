@@ -138,6 +138,17 @@ class RestMetadata:
         count_query = "/query?where=1%3D1&returnCountOnly=true&f=json"
         field_query = "?f=json"
         urls = [url + count_query, url + field_query]
+        self.source_count = -1
+        self.server_type = ""
+        self.name = ""
+        self.max_record_count = -1
+        self.pagination = False
+        self.stats = False
+        self.geo_type = ""
+        self.fields = []
+        self.oid_field = ""
+        self.max_min_oid = [-1, -1]
+        self.inc_oid = False
 
         with Session() as session:
             try:
