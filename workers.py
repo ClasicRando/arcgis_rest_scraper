@@ -124,7 +124,7 @@ class DataConsolidator(QRunnable):
             temp_files = [
                 file
                 for file in os.listdir(f"{os.getcwd()}\\temp_files")
-                if re.search(f"{self.service_name}_\\d+\\.csv", file)
+                if re.search(f"{re.escape(self.service_name)}_\\d+\\.csv", file)
             ]
             # For each temp file, read it into a DataFrame and write that DataFrame to the result
             # file
