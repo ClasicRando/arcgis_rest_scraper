@@ -3,11 +3,14 @@ import time
 import re
 import traceback
 import os
+
 from PyQt5.QtWidgets import (QMainWindow, QApplication, QFormLayout, QLineEdit, QWidget,
                              QPushButton, QPlainTextEdit, QProgressBar, QLabel)
 from PyQt5.QtCore import pyqtSlot, pyqtSignal, QRunnable, QThreadPool, QObject
 from functools import partial
-from typing import Optional, List, Tuple
+from typing import Optional, List, Tuple, Any
+
+from numpy import format_float_positional
 from requests import get, Session
 from pandas import DataFrame, read_csv
 from math import ceil
@@ -540,6 +543,35 @@ def max_min_query(oid_field: str) -> str:
            f'++%7D%0D%0A%5D&f=json'
 
 
+def convert_json_value(x: Any) -> str:
+    """
+    Function used to transform elements of a DataFrame to string based upon the type of object
+
+    This is the default implementation of the function that a FileLoader will use if the user does
+    not supply their own function
+
+    Parameters
+    ----------
+    x : Any
+        an object of Any type stored in a DataFrame
+    Returns
+    -------
+     string conversion of the values based upon it's type
+    """
+    if isinstance(x, str):
+        return x
+    elif isinstance(x, int):
+        return str(x)
+    elif isinstance(x, float):
+        return format_float_positional(x).rstrip(".")
+    elif isinstance(x, bool):
+        return "TRUE" if x else "FALSE"
+    elif x is None:
+        return ""
+    else:
+        return str(x)
+
+
 def handle_record(geo_type: str, feature: dict) -> List[str]:
     """
     Parameters
@@ -553,24 +585,27 @@ def handle_record(geo_type: str, feature: dict) -> List[str]:
     feature object converted to List[str] with geometry is applicable
     """
     # collect all values from the attributes key and convert them to string
-    record = [str(value).strip() for value in feature["attributes"].values()]
+    record = [
+        convert_json_value(value).strip()
+        for value in feature["attributes"].values()
+    ]
     # If geometry is point, get X and Y and add to the record. If no geometry present, default to a
     # blank X and Y
     if geo_type == "esriGeometryPoint":
         record += [
-            str(point).strip()
+            convert_json_value(point).strip()
             for point in feature.get("geometry", {"x": "", "y": ""}).values()
         ]
     # If geometry is multi point, join coordinates into a list of points using json list notation
     # and add to the record
     elif geo_type == "esriGeometryMultipoint":
         record += [
-            "[" + "],[".join((str(coordinate).strip() for coordinate in point)) + "]"
+            "[" + "],[".join((convert_json_value(coordinate).strip() for coordinate in point)) + "]"
             for point in feature["geometry"]["points"]
         ]
     # If geometry is Polygon get the rings and add the value to the record
     elif geo_type == "esriGeometryPolygon":
-        record += [str(feature["geometry"]["rings"][0]).strip()]
+        record += [convert_json_value(feature["geometry"]["rings"][0]).strip()]
     # Other geometries could exist but are not currently handled
     return record
 
