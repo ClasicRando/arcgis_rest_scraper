@@ -21,7 +21,7 @@ class MainWindow(QMainWindow):
         self.url = ""
         self.rest_metadata: Optional[RestMetadata] = None
         self.current_queries_running = 0
-        self.thread_pool = QThreadPool()
+        self.thread_pool = QThreadPool.globalInstance()
         self.start = 0.0
 
         # Setup layout and widgets
@@ -121,7 +121,7 @@ class MainWindow(QMainWindow):
         if self.current_queries_running == 0:
             self.progress_message.setText("Consolidating data and cleaning temp files")
             worker = DataConsolidator(self.rest_metadata.name, self.start)
-            worker.signals.error.connect(self.display_error)
+            worker.signals.error.connect(self.query_error)
             worker.signals.result.connect(self.post_scrape)
             self.thread_pool.start(worker)
 
@@ -143,13 +143,19 @@ class MainWindow(QMainWindow):
         self.txt_output.setPlainText(text)
         self.toggle_progress()
 
+    @pyqtSlot(str)
+    def query_error(self, error_tracback: str) -> None:
+        self.display_error(error_tracback)
+        self.thread_pool.clear()
+        self.thread_pool.waitForDone(1)
+        self.toggle_progress()
+
     def toggle_progress(self):
         """ Change current progress visibility to the opposite (eg if showing then hide widgets) """
         state = self.scraping_progress.isVisible()
         self.scraping_progress.setVisible(not state)
         self.progress_message.setVisible(not state)
 
-    @pyqtSlot(str)
     def display_error(self, trace_back: str) -> None:
         """ Use traceback from exception to set the output display """
         self.txt_output.setPlainText(trace_back)

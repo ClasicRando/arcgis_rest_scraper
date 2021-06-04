@@ -2,6 +2,8 @@ import time
 import re
 import traceback
 import os
+
+import requests.exceptions
 from PyQt5.QtCore import pyqtSlot, pyqtSignal, QRunnable, QObject
 from functools import partial
 from requests import get
@@ -54,34 +56,53 @@ class QueryFetcher(QRunnable):
         Action of runnable. Gets response from query and parses the features into a temp file
         """
         try:
-            # GET request using query
-            response = get(self.query)
-            num_records = 0
+            invalid_response = True
+            json_response = dict()
+
+            while invalid_response:
+                try:
+                    # GET request using query
+                    response = get(self.query)
+                    invalid_response = response.status_code != 200
+                    if invalid_response:
+                        print(f"Error: For query {self.query} got this response:\n{response.content}")
+
+                    json_response = response.json()
+                    response.close()
+                    if "features" not in json_response.keys():
+                        if "error" in json_response.keys():
+                            print("Request had an error... trying again")
+                            invalid_response = True
+                            time.sleep(10)
+                        else:
+                            raise KeyError("Response was not an error but no features found")
+                except requests.exceptions.ConnectionError:
+                    time.sleep(10)
+                    invalid_response = True
 
             # If successful query then consolidate features into DataFrame and write the results to
             # a temp file
-            if response.status_code == 200:
-                # Map features from response using handle_record and geo_type
-                data = list(
-                    map(
-                        partial(handle_record, self.rest_metadata.geo_type),
-                        response.json()["features"]
-                    )
+            # Map features from response using handle_record and geo_type
+            data = list(
+                map(
+                    partial(handle_record, self.rest_metadata.geo_type),
+                    json_response["features"]
                 )
-                # Create Dataframe using records and fields
-                df = DataFrame(
-                    data=data,
-                    columns=self.rest_metadata.fields,
-                    dtype=str
-                )
-                # Get the number of records in DataFrame
-                num_records = len(df.index)
-                # Write DataFrame to temp CSV file
-                df.to_csv(
-                    f"{os.getcwd()}\\temp_files\\{self.rest_metadata.name}_{self.query_num}.csv",
-                    mode="w",
-                    index=False
-                )
+            )
+            # Create Dataframe using records and fields
+            df = DataFrame(
+                data=data,
+                columns=self.rest_metadata.fields,
+                dtype=str
+            )
+            # Get the number of records in DataFrame
+            num_records = len(df.index)
+            # Write DataFrame to temp CSV file
+            df.to_csv(
+                f"{os.getcwd()}\\temp_files\\{self.rest_metadata.name}_{self.query_num}.csv",
+                mode="w",
+                index=False
+            )
         except:
             self.signals.error.emit(traceback.format_exc())
         else:
