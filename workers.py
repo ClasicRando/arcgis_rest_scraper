@@ -65,24 +65,27 @@ class QueryFetcher(QRunnable):
                     response = get(self.query)
                     invalid_response = response.status_code != 200
                     if invalid_response:
-                        print(f"Error: For query {self.query} got this response:\n{response.content}")
+                        print(f"Error: {self.query} got this response:\n{response.content}")
 
                     json_response = response.json()
                     response.close()
+                    # Check to make sure JSON response has features
                     if "features" not in json_response.keys():
+                        # No features in response and JSON has an error code, retry query
                         if "error" in json_response.keys():
                             print("Request had an error... trying again")
                             invalid_response = True
+                            # Sleep to give the server sometime to handle the request again
                             time.sleep(10)
+                        # No features in response and no error code. Raise error which terminates
+                        # all operations
                         else:
                             raise KeyError("Response was not an error but no features found")
                 except requests.exceptions.ConnectionError:
                     time.sleep(10)
                     invalid_response = True
 
-            # If successful query then consolidate features into DataFrame and write the results to
-            # a temp file
-            # Map features from response using handle_record and geo_type
+            # Once query is successful, Map features from response using handle_record and geo_type
             data = list(
                 map(
                     partial(handle_record, self.rest_metadata.geo_type),
