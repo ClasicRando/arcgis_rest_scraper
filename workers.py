@@ -30,7 +30,11 @@ class WorkerSignals(QObject):
 
 class QueryFetcher(QRunnable):
 
-    def __init__(self, query: str, query_num: int, rest_metadata: RestMetadata):
+    def __init__(self,
+                 query: str,
+                 query_num: int,
+                 rest_metadata: RestMetadata,
+                 max_tries: int = 10):
         """
         Runnable action to fetch a query result from the REST service and write the result to a temp
         file
@@ -48,6 +52,7 @@ class QueryFetcher(QRunnable):
         self.query = query
         self.query_num = query_num
         self.rest_metadata = rest_metadata
+        self.max_tries = max_tries
         self.signals = WorkerSignals()
 
     @pyqtSlot()
@@ -58,6 +63,7 @@ class QueryFetcher(QRunnable):
         try:
             invalid_response = True
             json_response = dict()
+            try_number = 1
 
             while invalid_response:
                 try:
@@ -77,6 +83,7 @@ class QueryFetcher(QRunnable):
                             invalid_response = True
                             # Sleep to give the server sometime to handle the request again
                             time.sleep(10)
+                            try_number += 1
                         # No features in response and no error code. Raise error which terminates
                         # all operations
                         else:
@@ -84,6 +91,9 @@ class QueryFetcher(QRunnable):
                 except requests.exceptions.ConnectionError:
                     time.sleep(10)
                     invalid_response = True
+                    try_number += 1
+                if try_number > self.max_tries:
+                    raise Exception(f"Too many tries to fetch query ({self.query})")
 
             # Once query is successful, Map features from response using handle_record and geo_type
             data = list(
