@@ -2,6 +2,8 @@ import time
 import re
 import traceback
 import os
+
+import requests.exceptions
 from PyQt5.QtCore import pyqtSlot, pyqtSignal, QRunnable, QObject
 from functools import partial
 from requests import get
@@ -28,11 +30,19 @@ class WorkerSignals(QObject):
 
 class QueryFetcher(QRunnable):
 
-    def __init__(self, query: str, query_num: int, rest_metadata: RestMetadata):
+    def __init__(self,
+                 query: str,
+                 query_num: int,
+                 rest_metadata: RestMetadata,
+                 max_tries: int = 10):
         """
         Runnable action to fetch a query result from the REST service and write the result to a temp
         file
 
+        TO-DO
+        -----
+        Allow for the user to set max_tries rather than use default value
+        
         Parameters
         ----------
         query : str
@@ -46,6 +56,7 @@ class QueryFetcher(QRunnable):
         self.query = query
         self.query_num = query_num
         self.rest_metadata = rest_metadata
+        self.max_tries = max_tries
         self.signals = WorkerSignals()
 
     @pyqtSlot()
@@ -54,34 +65,61 @@ class QueryFetcher(QRunnable):
         Action of runnable. Gets response from query and parses the features into a temp file
         """
         try:
-            # GET request using query
-            response = get(self.query)
-            num_records = 0
+            invalid_response = True
+            json_response = dict()
+            try_number = 1
 
-            # If successful query then consolidate features into DataFrame and write the results to
-            # a temp file
-            if response.status_code == 200:
-                # Map features from response using handle_record and geo_type
-                data = list(
-                    map(
-                        partial(handle_record, self.rest_metadata.geo_type),
-                        response.json()["features"]
-                    )
+            while invalid_response:
+                try:
+                    # GET request using query
+                    response = get(self.query)
+                    invalid_response = response.status_code != 200
+                    if invalid_response:
+                        print(f"Error: {self.query} got this response:\n{response.content}")
+
+                    json_response = response.json()
+                    response.close()
+                    # Check to make sure JSON response has features
+                    if "features" not in json_response.keys():
+                        # No features in response and JSON has an error code, retry query
+                        if "error" in json_response.keys():
+                            print("Request had an error... trying again")
+                            invalid_response = True
+                            # Sleep to give the server sometime to handle the request again
+                            time.sleep(10)
+                            try_number += 1
+                        # No features in response and no error code. Raise error which terminates
+                        # all operations
+                        else:
+                            raise KeyError("Response was not an error but no features found")
+                except requests.exceptions.ConnectionError:
+                    time.sleep(10)
+                    invalid_response = True
+                    try_number += 1
+                if try_number > self.max_tries:
+                    raise Exception(f"Too many tries to fetch query ({self.query})")
+
+            # Once query is successful, Map features from response using handle_record and geo_type
+            data = list(
+                map(
+                    partial(handle_record, self.rest_metadata.geo_type),
+                    json_response["features"]
                 )
-                # Create Dataframe using records and fields
-                df = DataFrame(
-                    data=data,
-                    columns=self.rest_metadata.fields,
-                    dtype=str
-                )
-                # Get the number of records in DataFrame
-                num_records = len(df.index)
-                # Write DataFrame to temp CSV file
-                df.to_csv(
-                    f"{os.getcwd()}\\temp_files\\{self.rest_metadata.name}_{self.query_num}.csv",
-                    mode="w",
-                    index=False
-                )
+            )
+            # Create Dataframe using records and fields
+            df = DataFrame(
+                data=data,
+                columns=self.rest_metadata.fields,
+                dtype=str
+            )
+            # Get the number of records in DataFrame
+            num_records = len(df.index)
+            # Write DataFrame to temp CSV file
+            df.to_csv(
+                f"{os.getcwd()}\\temp_files\\{self.rest_metadata.name}_{self.query_num}.csv",
+                mode="w",
+                index=False
+            )
         except:
             self.signals.error.emit(traceback.format_exc())
         else:
