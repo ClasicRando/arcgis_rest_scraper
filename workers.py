@@ -42,7 +42,7 @@ class QueryFetcher(QRunnable):
         TO-DO
         -----
         Allow for the user to set max_tries rather than use default value
-
+        
         Parameters
         ----------
         query : str
