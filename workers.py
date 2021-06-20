@@ -39,6 +39,10 @@ class QueryFetcher(QRunnable):
         Runnable action to fetch a query result from the REST service and write the result to a temp
         file
 
+        TO-DO
+        -----
+        Allow for the user to set max_tries rather than use default value
+
         Parameters
         ----------
         query : str
