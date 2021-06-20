@@ -1,3 +1,4 @@
+import json
 import time
 import re
 import traceback
@@ -7,6 +8,7 @@ from functools import partial
 from requests import get
 from pandas import DataFrame, read_csv
 from scraping import RestMetadata, handle_record
+from decimal import Decimal
 
 
 def trim_indent(text: str) -> str:
@@ -65,7 +67,8 @@ class QueryFetcher(QRunnable):
                 data = list(
                     map(
                         partial(handle_record, self.rest_metadata.geo_type),
-                        response.json()["features"]
+                        json.loads(response.content, parse_float=Decimal)["features"]
+                        # response.json(parse_float=Decimal)["features"]
                     )
                 )
                 # Create Dataframe using records and fields

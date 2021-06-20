@@ -1,4 +1,5 @@
 import json
+from decimal import Decimal
 from typing import List, Tuple, Any
 from numpy import format_float_positional
 from requests import Session
@@ -47,15 +48,20 @@ def convert_json_value(x: Any) -> str:
         return x
     elif isinstance(x, int):
         return str(x)
-    # Note that for JSON numbers, some truncation might occur during json load into python dict
+    # Added to handle new json parsing that uses Decimal rather than float
+    elif isinstance(x, Decimal):
+        return str(x)
     elif isinstance(x, float):
         return format_float_positional(x).rstrip(".")
     elif isinstance(x, bool):
         return "TRUE" if x else "FALSE"
     elif x is None:
         return ""
-    elif x is list:
-        return json.dumps(x)
+    # For json lists we convert the value to a json string representation, converts non-json types
+    # using the function it self. Replaces all " characters with nothing since numbers will be
+    # converted with " included. May cause affects if lists contain string but that's unlikely
+    elif isinstance(x, list):
+        return json.dumps(x, default=convert_json_value).replace('"', '')
     else:
         return str(x)
 
