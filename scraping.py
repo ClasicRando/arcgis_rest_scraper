@@ -1,6 +1,6 @@
 import json
 from decimal import Decimal
-from typing import List, Tuple, Any
+from typing import List, Any
 from numpy import format_float_positional
 from requests import Session
 from math import ceil
@@ -102,6 +102,11 @@ def handle_record(geo_type: str, feature: dict) -> List[str]:
 
 
 class RestMetadata:
+
+    count_query = "/query?where=1%3D1&returnCountOnly=true&f=json"
+    field_query = "?f=json"
+    oid_query = "/query?where=1%3D1&returnIdsOnly=true&f=json"
+
     """
     Data class for the backing information for an ArcGIS REST server and how to query the service
 
@@ -141,9 +146,7 @@ class RestMetadata:
     """
     def __init__(self, url: str):
         self.url = url
-        count_query = "/query?where=1%3D1&returnCountOnly=true&f=json"
-        field_query = "?f=json"
-        urls = [url + count_query, url + field_query]
+        urls = [url + self.count_query, url + self.field_query]
         self.source_count = -1
         self.server_type = ""
         self.name = ""
@@ -153,7 +156,7 @@ class RestMetadata:
         self.geo_type = ""
         self.fields = []
         self.oid_field = ""
-        self.max_min_oid = [-1, -1]
+        self.max_min_oid = (-1, -1)
         self.inc_oid = False
 
         with Session() as session:
@@ -197,13 +200,24 @@ class RestMetadata:
                     self.max_min_oid = (attributes["MAX_VALUE"], attributes["MIN_VALUE"])
                     diff = self.max_min_oid[0] - self.max_min_oid[1] + 1
                     self.inc_oid = diff == self.source_count
+                elif self.oid_field:
+                    res = fetch(session, self.url + self.oid_query)
+                    oid_values = res["objectIds"]
+                    self.max_min_oid = (max(oid_values), min(oid_values))
             except ConnectionError as ex:
                 self.source_count = -1
                 self.name = ex.strerror
 
     @property
     def scrape_count(self) -> int:
-        """ Used for generating queries. Caps feature count per query to 10000 """
+        """
+        Used for generating queries to set the max number of features scraped per query.
+
+        Caps feature count per query to 10000 when pagination or stats used
+        Caps feature count per query when objectids option used
+        """
+        if not self.pagination and not self.stats:
+            return 100
         return self.max_record_count if self.max_record_count <= 10000 else 10000
 
     @property
@@ -268,7 +282,7 @@ class RestMetadata:
                 self.url + self.get_pagination_query(i)
                 for i in range(self.pagination_query_count)
             ]
-        elif self.oid_field and self.stats:
+        elif self.oid_field:
             return [
                 self.url + self.get_oid_query(
                     self.max_min_oid[1] + (i * self.scrape_count)
