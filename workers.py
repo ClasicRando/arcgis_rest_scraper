@@ -25,12 +25,13 @@ def trim_indent(text: str) -> str:
 
 async def fetch_query(query: str,
                       rest_metadata: RestMetadata,
-                      max_tries: int) -> Optional[NamedTemporaryFile]:
+                      max_tries: int = 10) -> Optional[NamedTemporaryFile]:
     temp_file = NamedTemporaryFile(
         mode="w",
         encoding="utf8",
         suffix=".csv",
-        delete=False
+        delete=False,
+        newline="\n"
     )
     async with aiohttp.ClientSession() as session:
         try:
@@ -83,13 +84,15 @@ async def fetch_query(query: str,
             df.to_csv(
                 temp_file,
                 mode="w",
-                index=False
+                index=False,
+                line_terminator="\n"
             )
         except:
             print(traceback.format_exc())
             temp_file.close()
             os.remove(temp_file.name)
             return
+        temp_file.close()
         return temp_file
 
 
