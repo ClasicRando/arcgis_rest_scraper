@@ -2,6 +2,8 @@ import time
 import re
 import traceback
 import os
+import asyncio
+import aiohttp
 
 import requests.exceptions
 from PyQt5.QtCore import pyqtSlot, pyqtSignal, QRunnable, QObject
@@ -9,6 +11,8 @@ from functools import partial
 from requests import get
 from pandas import DataFrame, read_csv
 from scraping import RestMetadata, handle_record
+from tempfile import NamedTemporaryFile
+from typing import Optional
 
 
 def trim_indent(text: str) -> str:
@@ -17,6 +21,76 @@ def trim_indent(text: str) -> str:
     indents = min(len(match.group(0).replace("\t", "    "))
                   for match in re.finditer(r"^\s+", result, re.MULTILINE))
     return re.sub(" {" + str(indents) + "}", "", result)
+
+
+async def fetch_query(query: str,
+                      rest_metadata: RestMetadata,
+                      max_tries: int) -> Optional[NamedTemporaryFile]:
+    temp_file = NamedTemporaryFile(
+        mode="w",
+        encoding="utf8",
+        suffix=".csv",
+        delete=False
+    )
+    async with aiohttp.ClientSession() as session:
+        try:
+            invalid_response = True
+            json_response = dict()
+            try_number = 1
+            while invalid_response:
+                async with session.get(query) as response:
+                    try:
+                        invalid_response = response.status != 200
+                        if invalid_response:
+                            print(f"Error: {query} got this response:\n{await response.text()}")
+                        json_response = await response.json()
+                        # Check to make sure JSON response has features
+                        if "features" not in json_response.keys():
+                            # No features in response and JSON has an error code, retry query
+                            if "error" in json_response.keys():
+                                print("Request had an error... trying again")
+                                invalid_response = True
+                                # Sleep to give the server sometime to handle the request again
+                                time.sleep(10)
+                                try_number += 1
+                            # No features in response and no error code. Raise error which
+                            # terminates all operations
+                            else:
+                                raise KeyError("Response was not an error but no features found")
+                    except requests.exceptions.ConnectionError:
+                        time.sleep(10)
+                        invalid_response = True
+                        try_number += 1
+                if try_number > max_tries:
+                    raise Exception(f"Too many tries to fetch query ({query})")
+
+            # Once query is successful, Map features from response using handle_record and geo_type
+            data = list(
+                map(
+                    partial(handle_record, rest_metadata.geo_type),
+                    json_response["features"]
+                )
+            )
+            # Create Dataframe using records and fields
+            df = DataFrame(
+                data=data,
+                columns=rest_metadata.fields,
+                dtype=str
+            )
+            # Get the number of records in DataFrame
+            num_records = len(df.index)
+            # Write DataFrame to temp CSV file
+            df.to_csv(
+                temp_file,
+                mode="w",
+                index=False
+            )
+        except:
+            print(traceback.format_exc())
+            temp_file.close()
+            os.remove(temp_file.name)
+            return
+        return temp_file
 
 
 class WorkerSignals(QObject):
